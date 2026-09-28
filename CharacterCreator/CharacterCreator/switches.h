@@ -7,6 +7,8 @@
 // of the plugin to leave off, one or more of:
 //   overlay     the menu panel (and its DirectX hooks)
 //   direct      the panel's direct drawing (it is drawn through the HDR path)
+//   queuedevice (not a part) the panel is drawn with the device of the queue
+//               it draws on, not the one the swap chain names
 //   eyes        the eye colour file hook
 //   iriscopy    (not a part) the game's iris paths are named by a copy, not
 //               changed where the game keeps them

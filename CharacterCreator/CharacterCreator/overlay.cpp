@@ -310,7 +310,11 @@ static bool Setup(IDXGISwapChain* swapChain)
 
     ID3D12Device* device = NULL;
 
-    if (FAILED(swapChain->GetDevice(IID_PPV_ARGS(&device))))
+    // Troubleshooting (disable.txt "queuedevice"): the device of the queue
+    // drawn on, not the one the swap chain names.
+    static bool queueDevice = PartDisabled("queuedevice");
+
+    if (queueDevice ? FAILED(queue->GetDevice(IID_PPV_ARGS(&device))) : FAILED(swapChain->GetDevice(IID_PPV_ARGS(&device))))
     {
         Log("overlay: swap chain is not DirectX 12");
         return false;
@@ -600,6 +604,48 @@ static bool PrepareImage(UINT width, UINT height)
     return ok;
 }
 
+// For the log: an object and the module its methods are in (a wrapper such as
+// ReShade's, or the Direct3D runtime).
+static void DescribeObject(IUnknown* object, char* out, size_t size)
+{
+    char module[MAX_PATH] = "?";
+    HMODULE handle = NULL;
+
+    __try
+    {
+        void* method = object ? **(void***)object : NULL;
+
+        if (method && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR)method, &handle))
+            GetModuleFileNameA(handle, module, sizeof(module));
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+
+    const char* name = strrchr(module, '\\');
+    sprintf_s(out, size, "%p (%s)", object, name ? name + 1 : module);
+}
+
+static void LogDevices(IUnknown* bufferDevice)
+{
+    IUnknown* queueDevice = NULL;
+    ID3D12Device* device = NULL;
+
+    if (g_rs.queue && SUCCEEDED(g_rs.queue->GetDevice(IID_PPV_ARGS(&device))))
+    {
+        device->QueryInterface(IID_PPV_ARGS(&queueDevice));
+        device->Release();
+    }
+
+    char buffer[MAX_PATH + 32], drawing[MAX_PATH + 32], queue[MAX_PATH + 32];
+    DescribeObject(bufferDevice, buffer, sizeof(buffer));
+    DescribeObject(g_rs.device12, drawing, sizeof(drawing));
+    DescribeObject(queueDevice, queue, sizeof(queue));
+    Log("overlay diag: screen device %s, drawing device %s, drawing queue's device %s", buffer, drawing, queue);
+    SafeRelease(queueDevice);
+}
+
 // A frame generation tool (OptiScaler and others) can present buffers of its
 // own device: wrapping those for the game's device crashed the game. Nothing
 // is drawn on them.
@@ -609,7 +655,6 @@ static bool SameDevice(ID3D12Resource* buffer)
     // ReShade hand out other interface pointers of the same device).
     IUnknown* device = NULL;
     bool same = !g_rs.device12 || (SUCCEEDED(buffer->GetDevice(IID_PPV_ARGS(&device))) && device == g_rs.device12);
-    SafeRelease(device);
 
     static bool logged = false;
 
@@ -617,8 +662,10 @@ static bool SameDevice(ID3D12Resource* buffer)
     {
         logged = true;
         Log("overlay: the screen belongs to another Direct3D device (frame generation?) - the menu is not drawn");
+        LogDevices(device);
     }
 
+    SafeRelease(device);
     return same;
 }
 
