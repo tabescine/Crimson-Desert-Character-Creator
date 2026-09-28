@@ -152,6 +152,21 @@ static bool IsNormalMap(const char* value)
     return dot && dot - value >= 2 && dot[-2] == '_' && dot[-1] == 'n';
 }
 
+// Troubleshooting (disable.txt "iriscopy"): the game's own texture is named
+// by a copy of the path, the game's string left as it was read.
+static bool g_irisCopy = false;
+
+static void UnmarkedCopy(uintptr_t attribute, const char* value)
+{
+    char* copy = _strdup(value);
+
+    if (!copy)
+        return;
+
+    memcpy(copy + sizeof(MARK_START) - 2, "cd", 2);
+    *(const char**)(attribute + 0x08) = copy;
+}
+
 // Points every marked iris path of the tree at its character's colour, or
 // back at the game's texture (the mark written over with "cd"). The game
 // reads attribute values up to their terminating zero, so a static string of
@@ -184,6 +199,8 @@ static int SwapIris(uintptr_t root, int counts[CHARACTER_COUNT])
 
                 if (colour > 0 && !IsNormalMap(value))
                     *(const char**)(a + 0x08) = EYE_COLOURS[colour].texture;
+                else if (g_irisCopy)
+                    UnmarkedCopy(a, value);
                 else
                     memcpy(value + sizeof(MARK_START) - 2, "cd", 2);
 
@@ -344,6 +361,11 @@ void EyesInit(const char* folder)
 
     if (PartDisabled("eyes"))
         return;
+
+    g_irisCopy = PartDisabled("iriscopy");
+
+    if (g_irisCopy)
+        Log("eyes: iris paths copied, the game's strings left alone");
 
     BYTE* target = (BYTE*)AddressOf(ADDR_LOADXML);
 

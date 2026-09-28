@@ -8,6 +8,8 @@
 //   overlay     the menu panel (and its DirectX hooks)
 //   direct      the panel's direct drawing (it is drawn through the HDR path)
 //   eyes        the eye colour file hook
+//   iriscopy    (not a part) the game's iris paths are named by a copy, not
+//               changed where the game keeps them
 //   parser      the base character (race / gender) hook
 //   controller  the appearance controller hook (no look is applied)
 //   table       the character table gender fields
