@@ -1,0 +1,68 @@
+name: build
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      pack_release:
+        description: 'Release tag to take the menu data pack from (default: v<PLUGIN_VERSION>, else latest)'
+        required: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # build/CharacterCreator.data is made from the game's unpacked files by
+      # tools/build_data.py; reuse the one embedded in a released .asi instead.
+      - name: Menu data pack from release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pip install pefile
+          $version = (Select-String -Path CharacterCreator/CharacterCreator/version.h -Pattern '#define PLUGIN_VERSION "(.+)"').Matches[0].Groups[1].Value
+          $tag = '${{ inputs.pack_release }}'
+          if (-not $tag) { $tag = "v$version" }
+          gh release download $tag -R Khione95/Crimson-Desert-Character-Creator -p '*.zip' -D release_zip
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "no release $tag, using latest"
+            gh release download -R Khione95/Crimson-Desert-Character-Creator -p '*.zip' -D release_zip
+          }
+          Expand-Archive -Path (Get-ChildItem release_zip/*.zip)[0].FullName -DestinationPath release_zip/x
+          $asi = (Get-ChildItem release_zip/x -Recurse -Filter CharacterCreator.asi)[0].FullName
+          python tools/extract_data_pack.py $asi build/CharacterCreator.data
+
+      # The project targets v145 (VS 2026); fall back to v143 on older runners.
+      - name: Pick toolset
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $toolset = 'v145'
+          if (-not (Test-Path "$vs\MSBuild\Microsoft\VC\*\Platforms\x64\PlatformToolsets\v145")) { $toolset = 'v143' }
+          Write-Host "toolset $toolset ($vs)"
+          "TOOLSET=$toolset" >> $env:GITHUB_ENV
+
+      - name: Build
+        run: msbuild CharacterCreator/CharacterCreator/CharacterCreator.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=${{ env.TOOLSET }}
+
+      # The project builds CharacterCreator.dll; releases ship it as .asi.
+      - name: Stage
+        shell: pwsh
+        run: |
+          $out = 'CharacterCreator/CharacterCreator/x64/Release'
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "$out/CharacterCreator.dll" dist/CharacterCreator.asi
+          Copy-Item "$out/CharacterCreator.pdb" dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CharacterCreator-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
